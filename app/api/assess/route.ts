@@ -16,6 +16,30 @@ const schema = z.object({
   }),
 });
 
+const ALLOWED_ORIGIN = "https://sleepnow.figma.site";
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  };
+}
+
+function json(data: unknown, status = 200) {
+  return Response.json(data, {
+    status,
+    headers: corsHeaders(),
+  });
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders(),
+  });
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -29,15 +53,13 @@ export async function POST(req: Request) {
       .single();
 
     if (sessionInsert.error || !sessionInsert.data) {
-      return Response.json(
-        { error: "Failed to create session" },
-        { status: 500 }
-      );
+      console.error("Session insert error:", sessionInsert.error);
+      return json({ error: "Failed to create session" }, 500);
     }
 
     const session = sessionInsert.data;
 
-    await admin.from("quiz_answers").insert([
+    const answersInsert = await admin.from("quiz_answers").insert([
       { session_id: session.id, question_key: "sleep_hours", answer_value: answers.sleep_hours },
       { session_id: session.id, question_key: "fall_asleep_time", answer_value: answers.fall_asleep_time },
       { session_id: session.id, question_key: "night_wakeups", answer_value: answers.night_wakeups },
@@ -46,6 +68,11 @@ export async function POST(req: Request) {
       { session_id: session.id, question_key: "sleep_factors", answer_value: answers.sleep_factors },
       { session_id: session.id, question_key: "best_match", answer_value: answers.best_match },
     ]);
+
+    if (answersInsert.error) {
+      console.error("Answers insert error:", answersInsert.error);
+      return json({ error: "Failed to save answers" }, 500);
+    }
 
     const { score, sleep_type, blockers, warning } = scoreAnswers(answers);
     const { scoreLabel, summary, top_blocker, action_plan } = buildSummary(
@@ -58,6 +85,10 @@ export async function POST(req: Request) {
       .from("products")
       .select("*")
       .eq("active", true);
+
+    if (productQuery.error) {
+      console.error("Product query error:", productQuery.error);
+    }
 
     const products = chooseProducts(blockers, productQuery.data || []);
 
@@ -78,16 +109,12 @@ export async function POST(req: Request) {
       .single();
 
     if (resultInsert.error || !resultInsert.data) {
-      return Response.json(
-        { error: "Failed to save result" },
-        { status: 500 }
-      );
+      console.error("Result insert error:", resultInsert.error);
+      return json({ error: "Failed to save result" }, 500);
     }
 
-    const result = resultInsert.data;
-
-    return Response.json({
-      result_id: result.id,
+    return json({
+      result_id: resultInsert.data.id,
       score,
       score_label: scoreLabel,
       sleep_type,
@@ -99,6 +126,6 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error("Assess API error:", error);
-    return Response.json({ error: "Server error" }, { status: 500 });
+    return json({ error: "Server error" }, 500);
   }
 }
